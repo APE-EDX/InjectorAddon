@@ -7,8 +7,14 @@ else ()
 endif()
 
 add_custom_target(
+    InjectorAddon-install ALL
+    COMMAND npm install -g node-gyp
+)
+
+add_custom_target(
     InjectorAddon-configure ALL
     COMMAND node-gyp configure --directory=${PROJECT_SOURCE_DIR} --target=1.2.5 --arch=${ARCH} --dist-url=https://atom.io/download/atom-shell
+    DEPENDS InjectorAddon-install
 )
 
 add_custom_target(
