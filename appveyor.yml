@@ -25,7 +25,8 @@ install:
 build_script:
   - mkdir build
   - cd build
-  - cmake ..
+  - if "%platform%" == "x86" cmake ..
+  - if "%platform%" == "x64" cmake .. -G"Visual Studio 14 Win64"
   - cmake --build .
 
 # Post-install test scripts.
