@@ -19,8 +19,9 @@ using v8::Value;
 using v8::Exception;
 
 typedef BOOL (WINAPI *IsWow64Process_t) (HANDLE, PBOOL);
-
 IsWow64Process_t IsWow64Process_g;
+
+DWORD openMode = PROCESS_ALL_ACCESS;
 
 enum ProcessBits {
     PROCESS_32,
@@ -62,23 +63,31 @@ ProcessBits IsWow64Process(HANDLE handle)
 }
 
 
-void enableDebugPriv()
+bool enableDebugPriv()
 {
     HANDLE hToken;
     LUID luid;
     TOKEN_PRIVILEGES tkp;
+    bool success = false;
 
-    OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken);
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
+    {
+        if (LookupPrivilegeValue(NULL, SE_DEBUG_NAME, &luid))
+        {
+            tkp.PrivilegeCount = 1;
+            tkp.Privileges[0].Luid = luid;
+            tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
 
-    LookupPrivilegeValue(NULL, SE_DEBUG_NAME, &luid);
+            if (AdjustTokenPrivileges(hToken, false, &tkp, sizeof(tkp), NULL, NULL))
+            {
+                success = true;
+            }
+        }
 
-    tkp.PrivilegeCount = 1;
-    tkp.Privileges[0].Luid = luid;
-    tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+        CloseHandle(hToken);
+    }
 
-    AdjustTokenPrivileges(hToken, false, &tkp, sizeof(tkp), NULL, NULL);
-
-    CloseHandle(hToken);
+    return success;
 }
 
 template <typename T> bool startAndReturn(const char* process, T& retval)
@@ -125,6 +134,73 @@ template <typename T> bool startAndReturn(const char* process, T& retval)
     return true;
 }
 
+bool injectToPID(char* path, char* kernel32Exe, int pid)
+{
+    HANDLE hProcess = OpenProcess(openMode, FALSE, pid);
+    if (hProcess == NULL)
+    {
+        return false;
+    }
+
+    LPVOID loadLibrary = NULL;
+    ProcessBits bits = IsWow64Process(hProcess);
+    ProcessBits ownBits = IsWow64Process(GetCurrentProcess());
+
+    const char* arch = (bits == PROCESS_64) ? "64" : "32";
+    if (bits != ownBits)
+    {
+        // Setup correct bits for Kernel32 process call
+        int pos = strlen(kernel32Exe);
+        while (pos > 0 && kernel32Exe[--pos] != '{') {}
+        kernel32Exe[pos] = arch[0]; kernel32Exe[pos + 1] = arch[1];
+
+        if (!startAndReturn(kernel32Exe, loadLibrary))
+        {
+            CloseHandle(hProcess);
+            return false;
+        }
+    }
+    else
+    {
+        loadLibrary = (LPVOID)GetProcAddress(GetModuleHandleA("Kernel32.dll"), "LoadLibraryA");
+    }
+
+    // Setup correct bits for DLL
+    int pos = strlen(path);
+    while (pos > 0 && path[--pos] != '{') {}
+    path[pos] = arch[0]; path[pos + 1] = arch[1];
+
+    // Alloc size for the path
+    const size_t pathLen = strlen(path);
+    LPVOID pathAddr = VirtualAllocEx(hProcess, NULL, pathLen, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (pathAddr == NULL)
+    {
+        CloseHandle(hProcess);
+        return false;
+    }
+
+    // Write the path
+    if (WriteProcessMemory(hProcess, pathAddr, (LPCVOID)path, pathLen, NULL) == 0)
+    {
+        CloseHandle(hProcess);
+        return false;
+    }
+
+    // Create the LoadLibraryA thread
+    HANDLE hThread = CreateRemoteThread(hProcess, NULL, NULL, (LPTHREAD_START_ROUTINE)loadLibrary, pathAddr, 0, NULL);
+    if (hThread == NULL)
+    {
+        CloseHandle(hProcess);
+        return false;
+    }
+
+    // Wait for the thread and cleanup
+    WaitForSingleObject(hThread, INFINITE);
+    CloseHandle(hThread);
+    CloseHandle(hProcess);
+    return true;
+}
+
 void injectDLL(const FunctionCallbackInfo<Value>& args) {
     Isolate* isolate = args.GetIsolate();
 
@@ -166,80 +242,9 @@ void injectDLL(const FunctionCallbackInfo<Value>& args) {
         {
             if (stricmp(entry.szExeFile, process) == 0)
             {
-                HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID);
-                if (hProcess == NULL)
-                {
-                    args.GetReturnValue().Set(Boolean::New(isolate, false));
-                    CloseHandle(snapshot);
-                    return;
-                }
-
-                LPVOID loadLibrary = NULL;
-                ProcessBits bits = IsWow64Process(hProcess);
-                ProcessBits ownBits = IsWow64Process(GetCurrentProcess());
-				
-				const char* arch = (bits == PROCESS_64) ? "64" : "32";
-                if (bits != ownBits)
-                {					
-					// Setup correct bits for Kernel32 process call
-					int pos = strlen(kernel32Exe);
-					while (pos > 0 && kernel32Exe[--pos] != '{') {}
-					kernel32Exe[pos] = arch[0]; kernel32Exe[pos + 1] = arch[1];
-
-                    if (!startAndReturn(kernel32Exe, loadLibrary))
-                    {
-                        args.GetReturnValue().Set(Boolean::New(isolate, false));
-                        CloseHandle(hProcess);
-                        CloseHandle(snapshot);
-                        return;
-                    }
-                }
-                else
-                {
-					loadLibrary = (LPVOID)GetProcAddress(GetModuleHandleA("Kernel32.dll"), "LoadLibraryA");
-                }
-
-				// Setup correct bits for DLL
-				int pos = strlen(path);
-				while (pos > 0 && path[--pos] != '{') {}
-				path[pos] = arch[0]; path[pos + 1] = arch[1];
-
-				// Alloc size for the path
-				const size_t pathLen = strlen(path);
-				LPVOID pathAddr = VirtualAllocEx(hProcess, NULL, pathLen, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-				if (pathAddr == NULL)
-				{
-					args.GetReturnValue().Set(Boolean::New(isolate, false));
-					CloseHandle(hProcess);
-					CloseHandle(snapshot);
-					return;
-				}
-
-				// Write the path
-				if (WriteProcessMemory(hProcess, pathAddr, (LPCVOID)path, pathLen, NULL) == 0)
-				{
-					args.GetReturnValue().Set(Boolean::New(isolate, false));
-					CloseHandle(hProcess);
-					CloseHandle(snapshot);
-					return;
-				}
-
-				// Create the LoadLibraryA thread
-                HANDLE hThread = CreateRemoteThread(hProcess, NULL, NULL, (LPTHREAD_START_ROUTINE)loadLibrary, pathAddr, 0, NULL);
-                if (hThread == NULL)
-                {
-                    args.GetReturnValue().Set(Boolean::New(isolate, false));
-                    CloseHandle(hProcess);
-                    CloseHandle(snapshot);
-                    return;
-                }
-
-				// Wait for the thread and cleanup
-                WaitForSingleObject(hThread, INFINITE);
-                CloseHandle(hThread);
-                CloseHandle(hProcess);
+                bool success = injectToPID(path, kernel32Exe, entry.th32ProcessID);
                 CloseHandle(snapshot);
-                args.GetReturnValue().Set(Boolean::New(isolate, true));
+                args.GetReturnValue().Set(Boolean::New(isolate, success));
                 return;
             }
         }
@@ -249,10 +254,46 @@ void injectDLL(const FunctionCallbackInfo<Value>& args) {
     args.GetReturnValue().Set(Boolean::New(isolate, false));
 }
 
+void injectDLLByPID(const FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+
+    // Check the number of arguments passed.
+    if (args.Length() < 3)
+    {
+        // Throw an Error that is passed back to JavaScript
+        isolate->ThrowException(Exception::TypeError(
+            String::NewFromUtf8(isolate, "Wrong number of arguments")));
+        return;
+    }
+
+    // Check the argument types
+    if (!args[0]->IsInt32() || !args[1]->IsString() || !args[2]->IsString())
+    {
+        isolate->ThrowException(Exception::TypeError(
+            String::NewFromUtf8(isolate, "Wrong arguments")));
+        return;
+    }
+
+    int32_t pid = args[0]->Int32Value();
+
+	v8::String::Utf8Value pathV8(args[1]->ToString());
+	char* path = *pathV8;
+
+	v8::String::Utf8Value kernel32V8(args[2]->ToString());
+	char* kernel32Exe = *kernel32V8;
+
+    bool success = injectToPID(path, kernel32Exe, pid);
+    args.GetReturnValue().Set(Boolean::New(isolate, success));
+}
+
 void init(Local<Object> exports) {
-    enableDebugPriv();
+    if (!enableDebugPriv())
+    {
+        openMode = PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ;
+    }
 
     NODE_SET_METHOD(exports, "injectDLL", injectDLL);
+    NODE_SET_METHOD(exports, "injectDLLByPID", injectDLLByPID);
 }
 
 NODE_MODULE(injector, init)
