@@ -125,7 +125,7 @@ template <typename T> bool startWithPipe(const char* process, T& retval)
             {
                 uint64_t address;
                 DWORD dwRead;
-                if (ReadFile(hPipe, address, sizeof(uint64_t), &dwRead, NULL) != FALSE)
+                if (ReadFile(hPipe, (void*)&address, sizeof(uint64_t), &dwRead, NULL) != FALSE)
                 {
                     retval = (T)address;
                     success = true;
