@@ -13,13 +13,13 @@ add_custom_target(
 
 add_custom_target(
     InjectorAddon-configure ALL
-    COMMAND node-gyp configure --directory=${PROJECT_SOURCE_DIR} --target=1.2.5 --arch=${ARCH} --dist-url=https://atom.io/download/atom-shell
+    COMMAND node-gyp configure --directory=${PROJECT_SOURCE_DIR} --target=1.3.0 --arch=${ARCH} --dist-url=https://atom.io/download/atom-shell
     DEPENDS InjectorAddon-install
 )
 
 add_custom_target(
     InjectorAddon-build ALL
-    COMMAND node-gyp build --directory=${PROJECT_SOURCE_DIR} --target=1.2.5 --arch=${ARCH} --dist-url=https://atom.io/download/atom-shell
+    COMMAND node-gyp build --directory=${PROJECT_SOURCE_DIR} --target=1.3.0 --arch=${ARCH} --dist-url=https://atom.io/download/atom-shell
     DEPENDS InjectorAddon-configure
 )
 
