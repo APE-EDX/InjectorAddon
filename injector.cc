@@ -90,14 +90,12 @@ bool enableDebugPriv()
     return success;
 }
 
-template <typename T> bool startAndReturn(const char* process, T& retval)
+template <typename T> bool startWithPipe(const char* process, T& retval)
 {
+    bool success = false;
     const size_t stringSize = 1000;
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
-
-	// TODO: DWORD won't work for 64 bits :/ Another method to pass address must be found
-    DWORD exit_code;
 
     ZeroMemory(&si, sizeof(si));
     si.cb = sizeof(si);
@@ -106,32 +104,47 @@ template <typename T> bool startAndReturn(const char* process, T& retval)
     // Defaut to -1
     retval = (T)-1;
 
-    // Start the child process.
-    if (!CreateProcessA(NULL,   // No module name (use command line)
-        (LPSTR)process,   // Command line
-        NULL,           // Process handle not inheritable
-        NULL,           // Thread handle not inheritable
-        FALSE,          // Set handle inheritance to FALSE
-        0,              // No creation flags
-        NULL,           // Use parent's environment block
-        NULL,           // Use parent's starting directory
-        &si,            // Pointer to STARTUPINFO structure
-        &pi)           // Pointer to PROCESS_INFORMATION structure
-        )
+    // Open pipe
+    HANDLE hPipe = CreateNamedPipe(TEXT("\\\\.\\pipe\\APEKernelPipe"), PIPE_ACCESS_DUPLEX | PIPE_TYPE_BYTE | PIPE_READMODE_BYTE, PIPE_WAIT, 1, 1024 * 16, 1024 * 16, NMPWAIT_USE_DEFAULT_WAIT, NULL);
+    if (hPipe != INVALID_HANDLE_VALUE)
     {
-        return false;
+        // Start the child process.
+        if (CreateProcessA(NULL,   // No module name (use command line)
+            (LPSTR)process,   // Command line
+            NULL,           // Process handle not inheritable
+            NULL,           // Thread handle not inheritable
+            FALSE,          // Set handle inheritance to FALSE
+            0,              // No creation flags
+            NULL,           // Use parent's environment block
+            NULL,           // Use parent's starting directory
+            &si,            // Pointer to STARTUPINFO structure
+            &pi)           // Pointer to PROCESS_INFORMATION structure
+            )
+        {
+            if (ConnectNamedPipe(hPipe, NULL) != FALSE)
+            {
+                uint64_t address;
+                DWORD dwRead;
+                if (ReadFile(hPipe, address, sizeof(uint64_t), &dwRead, NULL) != FALSE)
+                {
+                    retval = (T)address;
+                    success = true;
+                }
+            }
+        }
+
+        // Close pipe
+        DisconnectNamedPipe(hPipe);
+
+        // Wait until child process exits.
+        WaitForSingleObject(pi.hProcess, INFINITE);
+
+        // Close process and thread handles.
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
     }
 
-    // Wait until child process exits.
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    GetExitCodeProcess(pi.hProcess, &exit_code);
-
-    // Close process and thread handles.
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-
-    retval = (T)exit_code;
-    return true;
+    return success;
 }
 
 bool injectToPID(char* path, char* kernel32Exe, int pid)
@@ -154,7 +167,7 @@ bool injectToPID(char* path, char* kernel32Exe, int pid)
         while (pos > 0 && kernel32Exe[--pos] != '{') {}
         kernel32Exe[pos] = arch[0]; kernel32Exe[pos + 1] = arch[1];
 
-        if (!startAndReturn(kernel32Exe, loadLibrary))
+        if (!startWithPipe(kernel32Exe, loadLibrary))
         {
             CloseHandle(hProcess);
             return false;
