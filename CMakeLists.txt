@@ -6,9 +6,20 @@ else ()
     set(ARCH ia32)
 endif()
 
+add_subdirectory(deps)
+
+set(EXTERNAL_LIBRARIES "")
+set(EXTERNAL_DIRS "")
+if(UNIX)
+    set(EXTERNAL_LIBRARIES "\"deps/hotpatch/src/libhotpatch_s.a\"")
+    set(EXTERNAL_DIRS "\"${PROJECT_SOURCE_DIR}/build/deps/hotpatch/include\", \"${PROJECT_SOURCE_DIR}/deps/hotpatch/include\"")
+endif()
+configure_file(${PROJECT_SOURCE_DIR}/binding.gyp.in ${PROJECT_SOURCE_DIR}/binding.gyp)
+
 add_custom_target(
     InjectorAddon-install ALL
     COMMAND npm install -g node-gyp
+    DEPENDS hotpatch_s
 )
 
 add_custom_target(

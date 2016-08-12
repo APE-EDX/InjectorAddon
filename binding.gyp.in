@@ -1,0 +1,10 @@
+{
+  "targets": [
+    {
+      "target_name": "injector",
+      "sources": [ "injector.cc" ],
+      "include_dirs": [ ${EXTERNAL_DIRS} ],
+      "libraries": [ ${EXTERNAL_LIBRARIES} ]
+    }
+  ]
+}
