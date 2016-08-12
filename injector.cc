@@ -149,6 +149,12 @@ template <typename T> bool startWithPipe(const char* process, T& retval)
 
 bool injectToPID(char* path, char* kernel32Exe, int pid)
 {
+    openMode = PROCESS_ALL_ACCESS;
+    if (!enableDebugPriv())
+    {
+        openMode = PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ;
+    }
+
     HANDLE hProcess = OpenProcess(openMode, FALSE, pid);
     if (hProcess == NULL)
     {
@@ -300,11 +306,6 @@ void injectDLLByPID(const FunctionCallbackInfo<Value>& args) {
 }
 
 void init(Local<Object> exports) {
-    if (!enableDebugPriv())
-    {
-        openMode = PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ;
-    }
-
     NODE_SET_METHOD(exports, "injectDLL", injectDLL);
     NODE_SET_METHOD(exports, "injectDLLByPID", injectDLLByPID);
 }
