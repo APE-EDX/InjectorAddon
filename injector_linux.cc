@@ -26,7 +26,7 @@ void injectDLLByPID(const FunctionCallbackInfo<Value>& args) {
     Isolate* isolate = args.GetIsolate();
 
     // Check the number of arguments passed.
-    if (args.Length() < 3)
+    if (args.Length() < 2)
     {
         // Throw an Error that is passed back to JavaScript
         isolate->ThrowException(Exception::TypeError(
@@ -35,7 +35,7 @@ void injectDLLByPID(const FunctionCallbackInfo<Value>& args) {
     }
 
     // Check the argument types
-    if (!args[0]->IsInt32() || !args[1]->IsString() || !args[2]->IsString())
+    if (!args[0]->IsInt32() || !args[1]->IsString())
     {
         isolate->ThrowException(Exception::TypeError(
             String::NewFromUtf8(isolate, "Wrong arguments")));
