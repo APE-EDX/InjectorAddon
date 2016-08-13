@@ -1,7 +1,7 @@
 #include <hotpatch_config.h>
 #include <hotpatch.h>
 
-bool injectToPID(const char* path, int32_t pid)
+bool injectToPID(char* path, int32_t pid)
 {
     hotpatch_t* hp = hotpatch_create(pid, false);
     if (!hp)
@@ -50,8 +50,8 @@ void injectDLLByPID(const FunctionCallbackInfo<Value>& args) {
 
     int32_t pid = args[0]->Int32Value();
 
-	v8::String::Utf8Value pathV8(args[1]->ToString());
-	char* path = *pathV8;
+    v8::String::Utf8Value pathV8(args[1]->ToString());
+    char* path = *pathV8;
 
     bool success = injectToPID(path, pid);
     args.GetReturnValue().Set(Boolean::New(isolate, success));
