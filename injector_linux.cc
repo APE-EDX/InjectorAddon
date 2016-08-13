@@ -9,6 +9,12 @@ bool injectToPID(const char* path, int32_t pid)
         return false;
     }
 
+    // Setup correct bits for DLL
+    const char* arch = "64"; // TODO: Detect process bits, do not hardcode
+    int pos = strlen(path);
+    while (pos > 0 && path[--pos] != '{') {}
+    path[pos] = arch[0]; path[pos + 1] = arch[1];
+
     uintptr_t dlres = 0;
     uintptr_t symres = 0;
     int rc = hotpatch_inject_library(hp, path, "loadMsg", NULL, 0, &dlres, &symres);
